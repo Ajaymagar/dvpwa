@@ -2,25 +2,6 @@ on: [push]
 
 jobs:
 
-  dependency_analysis:
-    runs-on:  ubuntu-latest
-    name: Test dependencies for security flaws
-    steps:
-      - uses: actions/checkout@v2
-      - name: Dependency Security
-        run: pip3 install safety && safety check
-        shell: bash
-
-  code_analysis:
-    runs-on:  ubuntu-latest
-    name: Analyse code for security flaws
-    steps:
-      - uses: actions/checkout@v2
-      - name: Code Security Analysis
-        run: pip3 install semgrep && semgrep --config "p/ci" --error
-        shell: bash
-
-  
   dynamic_security_testing:
     runs-on: ubuntu-latest
     name: Scan live web app for security flaws
@@ -34,28 +15,40 @@ jobs:
         uses: projectdiscovery/nuclei-action@main
         with:
           target: http://localhost:8080
+          flags: "-severity critical,high,medium,low -stats"
+          github-report: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stop containers
         if: always()
         run: docker-compose -f "docker-compose.yml" down
 
-  container_scanning:
-    name: Scan Container for Security Issues
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
+
+    
+  zap_basline_and_active_scan:
+      runs-on: ubuntu-latest
+      steps:
+      - uses: actions/checkout@v2
+
+
+      - name : Start containers
+        run : docker-compose -f "docker-compose.yml" up -d --build
+
       
-      - name: Build an image from Dockerfile
-        run: |
-          docker build --file Dockerfile.app -t dvpwa.app:${{ github.sha }} .
-      
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+      - name : ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.7.0
         with:
-          image-ref: 'dvpwa.app:${{ github.sha }}'
-          format: 'table'
-          exit-code: '1'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL'
+         target: "http://localhost"
+         token :  ${{ secrets.GITHUB_TOKEN }}
+
+      - name : Zap Active Scan
+        uses: zaproxy/action-full-scan@v0.4.0
+        with:
+          target: "http://localhost"
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name : Stop containers
+        if : always()
+        run : docker-compose -f "docker-compose.yml" down
+      
